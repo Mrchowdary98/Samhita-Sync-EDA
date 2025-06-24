@@ -65,18 +65,16 @@ def login_page():
     with col1:
         st.markdown("""
             <div style='padding: 2rem;'>
-                <h1 style='color: #004080;'>🔗 Samhita Sync</h1>
-                <p style='font-size: 18px;'>
-                    The Ultimate No-Code EDA Assistant
-                </p>
-                <ul style='font-size: 16px; line-height: 1.6;'>
-                    <li>📊 Descriptive Statistics</li>
-                    <li>🔍 Data Quality Assessment</li>
-                    <li>📈 Visualizations</li>
-                    <li>🛠️ Feature Engineering</li>
-                    <li>📅 Time Series & Statistical Tests</li>
+                <h1 style='color: #004080; font-size: 3rem;'>📊 Samhita Sync</h1>
+                <p style='font-size: 18px;'>Developed by <strong>Manikanta Damacharla</strong></p>
+                <br>
+                <ul style='font-size: 18px; line-height: 1.8;'>
+                    <li>✅ Deep profiling</li>
+                    <li>✅ Feature engineering</li>
+                    <li>✅ Statistical tests</li>
+                    <li>✅ Time series analysis</li>
+                    <li>✅ Visualizations & insights</li>
                 </ul>
-                <br><strong>Developed by Manikanta Damacharla</strong>
             </div>
         """, unsafe_allow_html=True)
 
@@ -97,6 +95,7 @@ def login_page():
                 st.error("Invalid credentials. Please try again.")
 
 # Main App Logic
+
 def main():
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
@@ -114,7 +113,6 @@ def main():
         st.session_state.clear()
         st.experimental_rerun()
 
-    # Admin panel to view login logs
     if st.session_state['role'] == 'admin':
         st.markdown("### 🔐 Admin Panel: Login History")
         if os.path.exists(LOGIN_LOG_FILE):
@@ -125,18 +123,98 @@ def main():
         else:
             st.info("No login records found.")
 
-    uploaded_file = st.sidebar.file_uploader("Upload a dataset", type=["csv", "xlsx", "xls", "json", "parquet"])
+    if st.session_state['role'] in ['admin', 'analyst']:
+        uploaded_file = st.sidebar.file_uploader("Upload a dataset", type=["csv", "xlsx", "xls", "json", "parquet", "tsv", "txt", "pkl"])
 
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file)
+        if uploaded_file:
+            def load_data(file):
+                try:
+                    file_name = file.name
+                    file_content = file.read()
+                    file_extension = file_name.lower().split('.')[-1]
+                    file_obj = io.BytesIO(file_content)
 
-        st.write("### Sample Preview")
-        st.dataframe(df.head())
+                    if file_extension == 'csv':
+                        for enc in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+                            try:
+                                file_obj.seek(0)
+                                return pd.read_csv(file_obj, encoding=enc, low_memory=False)
+                            except UnicodeDecodeError:
+                                continue
+                        raise ValueError("CSV decoding failed.")
+                    elif file_extension in ['xlsx', 'xls']:
+                        return pd.read_excel(file_obj)
+                    elif file_extension == 'json':
+                        return pd.read_json(file_obj)
+                    elif file_extension == 'parquet':
+                        return pd.read_parquet(file_obj)
+                    elif file_extension == 'tsv':
+                        return pd.read_csv(file_obj, sep='	', low_memory=False)
+                    elif file_extension == 'txt':
+                        file_obj.seek(0)
+                        sample = file_obj.read(1024).decode('utf-8', errors='ignore')
+                        file_obj.seek(0)
+                        if '	' in sample:
+                            return pd.read_csv(file_obj, sep='	', low_memory=False)
+                        elif ';' in sample:
+                            return pd.read_csv(file_obj, sep=';', low_memory=False)
+                        elif '|' in sample:
+                            return pd.read_csv(file_obj, sep='|', low_memory=False)
+                        else:
+                            return pd.read_csv(file_obj, low_memory=False)
+                    elif file_extension == 'pkl':
+                        return pd.read_pickle(file_obj)
+                    else:
+                        st.error(f"Unsupported file format: .{file_extension}")
+                        return None
+                except Exception as e:
+                    st.error(f"Error loading file: {str(e)}")
+                    return None
 
-        st.write("### Basic Stats")
-        st.write(df.describe())
-    else:
-        st.info("Please upload a dataset to get started.")
+            df = load_data(uploaded_file)
+            if df is not None:
+                st.markdown("## 📋 Dataset Overview")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1: st.metric("Rows", f"{df.shape[0]:,}")
+                with col2: st.metric("Columns", f"{df.shape[1]:,}")
+                with col3: st.metric("Memory", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+                with col4: st.metric("Duplicates", f"{df.duplicated().sum():,}")
+
+                st.markdown("### 🔍 Column Summary")
+                summary = pd.DataFrame({
+                    "Column": df.columns,
+                    "Type": [str(df[col].dtype) for col in df.columns],
+                    "Non-Null": df.notnull().sum().values,
+                    "Null %": df.isnull().mean().round(2).mul(100).values,
+                    "Unique": df.nunique().values
+                })
+                st.dataframe(summary)
+
+                st.markdown("### 🔬 Descriptive Stats")
+                st.dataframe(df.describe(include='all'), use_container_width=True)
+
+                st.markdown("### 🧪 Data Quality Checks")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Missing Values")
+                    missing_df = df.isnull().sum()
+                    if missing_df.sum() == 0:
+                        st.success("No missing values found.")
+                    else:
+                        miss_df = pd.DataFrame({"Column": missing_df.index, "Missing": missing_df.values})
+                        miss_df = miss_df[miss_df.Missing > 0]
+                        st.dataframe(miss_df)
+                with col2:
+                    st.subheader("Constant Columns")
+                    const = [col for col in df.columns if df[col].nunique() <= 1]
+                    if const:
+                        st.warning(f"{len(const)} constant columns: {', '.join(const)}")
+                    else:
+                        st.success("No constant columns found.")
+            else:
+                st.warning("Please upload a valid dataset.")
+    elif st.session_state['role'] == 'viewer':
+        st.info("👀 You are logged in as a Viewer. Dataset upload and analysis are restricted.")
 
     # Footer
     st.markdown("""
