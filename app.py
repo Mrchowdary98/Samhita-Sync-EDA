@@ -58,6 +58,43 @@ def log_login_event(user_email):
             writer.writerow(["Username", "Login Time", "Role"])
         writer.writerow(entry)
 
+# Data loader function
+
+def load_data(file):
+    try:
+        file_name = file.name
+        file_extension = file_name.split(".")[-1].lower()
+        file_content = file.read()
+        file_obj = io.BytesIO(file_content)
+
+        if file_extension == "csv":
+            for enc in ["utf-8", "latin-1", "cp1252", "iso-8859-1"]:
+                try:
+                    file_obj.seek(0)
+                    return pd.read_csv(file_obj, encoding=enc, low_memory=False)
+                except UnicodeDecodeError:
+                    continue
+            raise ValueError("CSV decoding failed.")
+
+        elif file_extension in ["xlsx", "xls"]:
+            return pd.read_excel(file_obj)
+        elif file_extension == "json":
+            return pd.read_json(file_obj)
+        elif file_extension == "parquet":
+            return pd.read_parquet(file_obj)
+        elif file_extension == "tsv":
+            return pd.read_csv(file_obj, sep="\t")
+        elif file_extension == "txt":
+            return pd.read_csv(file_obj, sep=None, engine="python")
+        elif file_extension == "pkl":
+            return pd.read_pickle(file_obj)
+        else:
+            st.error(f"Unsupported file format: .{file_extension}")
+            return None
+    except Exception as e:
+        st.error(f"❌ Failed to load file: {str(e)}")
+        return None
+
 # Login Page Function
 def login_page():
     col1, col2 = st.columns([1, 1])
@@ -90,7 +127,7 @@ def login_page():
                 st.session_state['role'] = USER_CREDENTIALS[username]['role']
                 st.session_state['login_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log_login_event(username)
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid credentials. Please try again.")
 
@@ -119,24 +156,31 @@ def main():
 
     if st.button("Logout"):
         st.session_state.clear()
-        st.experimental_rerun()
+        st.rerun()
 
     if st.session_state['role'] in ['admin', 'analyst']:
         st.sidebar.header("📁 Upload Dataset")
-        uploaded_file = st.sidebar.file_uploader("Choose a file", type=["csv", "xlsx", "xls", "json", "parquet"])
+        uploaded_file = st.sidebar.file_uploader("Choose a file", type=["csv", "xlsx", "xls", "json", "parquet", "tsv", "txt", "pkl"])
+
+        st.sidebar.header("🧪 Analysis Options")
+        show_basic = st.sidebar.checkbox("📋 Basic Information", True)
+        show_quality = st.sidebar.checkbox("🔍 Data Quality Assessment", True)
+        show_summary = st.sidebar.checkbox("📊 Statistical Summary")
+        show_ts = st.sidebar.checkbox("📅 Time Series Analysis")
+        show_vis = st.sidebar.checkbox("📈 Visualizations")
+        show_auto = st.sidebar.checkbox("💡 Automated insights")
+        show_tests = st.sidebar.checkbox("🧪 Statistical Tests")
+        show_fe = st.sidebar.checkbox("🛠 Feature Engineering")
 
         if uploaded_file:
-            df = pd.read_csv(uploaded_file)
-            st.success(f"✅ Loaded `{uploaded_file.name}`")
+            if st.sidebar.button("🔁 Refresh Data"):
+                st.rerun()
 
-            st.sidebar.header("🧪 Analysis Options")
-            show_basic = st.sidebar.checkbox("📋 Basic Information", True)
-            show_quality = st.sidebar.checkbox("🔍 Data Quality Assessment", True)
-            show_summary = st.sidebar.checkbox("📊 Statistical Summary")
-            show_ts = st.sidebar.checkbox("📅 Time Series Analysis")
-            show_vis = st.sidebar.checkbox("📈 Visualizations")
-            show_tests = st.sidebar.checkbox("🧪 Statistical Tests")
-            show_fe = st.sidebar.checkbox("🛠 Feature Engineering")
+            df = load_data(uploaded_file)
+            if df is None:
+                return
+
+            st.success(f"✅ Loaded `{uploaded_file.name}`")
 
             if show_basic:
                 st.markdown("### 📋 Dataset Overview")
@@ -182,6 +226,18 @@ def main():
                         st.markdown(", ".join(outliers[:5]) + ("..." if len(outliers) > 5 else ""))
                     else:
                         st.success("No major outlier issues.")
+
+            if show_tests:
+                st.markdown("### 🧪 Statistical Tests")
+                numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+                if len(numeric_cols) >= 2:
+                    col1 = st.selectbox("Select first numeric column:", numeric_cols)
+                    col2 = st.selectbox("Select second numeric column:", [c for c in numeric_cols if c != col1])
+
+                    if st.button("Run Pearson Correlation Test"):
+                        corr, pval = stats.pearsonr(df[col1].dropna(), df[col2].dropna())
+                        st.info(f"Pearson Correlation Coefficient between `{col1}` and `{col2}`: **{corr:.4f}**")
+                        st.info(f"P-value: **{pval:.4e}**")
 
     elif st.session_state['role'] == 'viewer':
         st.info("👀 You are logged in as a Viewer. Dataset upload and analysis are restricted.")
